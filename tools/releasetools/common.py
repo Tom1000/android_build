@@ -598,12 +598,22 @@ def _BuildBootableImage(sourcedir, fs_config_file, info_dict=None,
     else:
       cmd = ["mkbootfs", os.path.join(sourcedir, "RAMDISK")]
     p1 = Run(cmd, stdout=subprocess.PIPE)
-    p2 = Run(["minigzip"], stdin=p1.stdout, stdout=ramdisk_img.file.fileno())
+    if info_dict.get("lz4_ramdisks") == 'true':
+      p2 = Run(["lz4", "-l", "-12" , "--favor-decSpeed"], stdin=p1.stdout,
+               stdout=ramdisk_img.file.fileno())
+    elif info_dict.get("xz_ramdisks") == 'true':
+      p2 = Run(["xz", "-f", "-c", "--check=crc32"], stdin=p1.stdout,
+               stdout=ramdisk_img.file.fileno())
+    elif info_dict.get("lzma_ramdisks") == 'true':
+      p2 = Run(["xz", "-f", "-c", "--format=lzma", "--check=crc32"], stdin=p1.stdout,
+               stdout=ramdisk_img.file.fileno())
+    else:
+      p2 = Run(["minigzip"], stdin=p1.stdout, stdout=ramdisk_img.file.fileno())
 
     p2.wait()
     p1.wait()
     assert p1.returncode == 0, "mkbootfs of %s ramdisk failed" % (sourcedir,)
-    assert p2.returncode == 0, "minigzip of %s ramdisk failed" % (sourcedir,)
+    assert p2.returncode == 0, "compression of %s ramdisk failed" % (sourcedir,)
 
     return ramdisk_img
 
@@ -2302,7 +2312,6 @@ def MakeRecoveryPatch(input_dir, output_sink, recovery_img, boot_img,
     info_dict = OPTIONS.info_dict
 
   full_recovery_image = info_dict.get("full_recovery_image") == "true"
-  use_bsdiff = info_dict.get("no_gzip_recovery_ramdisk") == "true"
 
   if full_recovery_image:
     output_sink("etc/recovery.img", recovery_img.data)
@@ -2313,7 +2322,7 @@ def MakeRecoveryPatch(input_dir, output_sink, recovery_img, boot_img,
     # With system-root-image, boot and recovery images will have mismatching
     # entries (only recovery has the ramdisk entry) (Bug: 72731506). Use bsdiff
     # to handle such a case.
-    if system_root_image or use_bsdiff:
+    if system_root_image:
       diff_program = ["bsdiff"]
       bonus_args = ""
       assert not os.path.exists(path)
